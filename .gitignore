@@ -1,3 +1,14 @@
-# OS generated files #
-######################
-.DS_Store
+# System files osx
+**/.DS_Store
+
+# Python files
+__pycache__
+
+# eclipse
+.project
+
+# Visual Studio Code
+.vscode
+
+
+
