@@ -72,7 +72,7 @@ def main():
 
         # Write the surface mesh as a VTP file
         writer_surface = vtk.vtkXMLPolyDataWriter()
-        writer_surface.SetFileName(f'unit_cube_Z{i}.vtp')
+        writer_surface.SetFileName(f'vtk2_Z{i}.vtp')
         writer_surface.SetInputData(surface_mesh)
         # writer_surface.SetDataModeToBinary()
         # writer_surface.SetEncodeAppendedData(False)
