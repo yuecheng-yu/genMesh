@@ -6,108 +6,126 @@ import os
 
 from collections import defaultdict
 from vtk.util.numpy_support import numpy_to_vtk as n2v
+from vtk.util.numpy_support import vtk_to_numpy as v2n
 
-def threshold(inp, t, name):
-    """
-    Threshold according to cell array
-    Args:
-        inp: InputConnection
-        t: BC_FaceID
-        name: name in cell data used for thresholding
-    Returns:
-        reader, point data
-    """
-    thresh = vtk.vtkThreshold()
-    thresh.SetInputData(inp)
-    thresh.SetInputArrayToProcess(0, 0, 0, 1, name)
-    thresh.ThresholdBetween(t, t)
-    thresh.Update()
-    return thresh
+from vtk_functions import (
+    read_geo,
+    write_geo,
+    extract_surface,
+    threshold,
+    clean,
+)
 
 def main():
 
+    path = "/Users/yuechengyu/Work/Cardiac/svFSIplus/example/mesh/unitCube"
+    # path = "./mesh"
+
+    # create cube vol mesh
+    # Define points for a unit cube
+    points = np.array([
+        [0.0, 0.0, 0.0],  # Bottom surface points
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],  # Top surface points
+        [1.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [0.0, 1.0, 1.0]
+    ])
+    points_data = {
+        "GlobalNodeID" : np.arange(len(points)) + 1,
+        "Z0" : np.where(points[:, 2] == 0, 1, 0),
+        "Z1" : np.where(points[:, 2] == 1, 1, 0),
+    }
+
+    # Define cells using the VTK format for hexahedrons
+    cells = [("hexahedron", np.array([[0, 1, 2, 3, 4, 5, 6, 7]]))]
+    cells_data = {
+        "GlobalElementID": np.expand_dims(np.arange(len(cells)) + 1, axis=1)
+    }
+
+    # Create the volume mesh
+    
+    volume_mesh = meshio.Mesh(points, cells, point_data=points_data, cell_data=cells_data)
+
+    # # Define the bottom face of the cube
+    # bot_face = np.where(points[:, 2] == 0, 1, 0)
+    # print(bot_face)
+    # # Define the top face of the cube
+    # top_face = np.where(points[:, 2] == 1, 1, 0)
+    # print(top_face)
+
+    # # Add to the point data
+    # volume_mesh.point_data["bot_face"] = bot_face
+    # volume_mesh.point_data["top_face"] = top_face
+
+    # Save the volume mesh
+    volume_mesh_path = path+"/unit_cube_volume.vtu"
+    meshio.write(volume_mesh_path, volume_mesh, file_format="vtu")
+
+    # # check arrays of vol mesh 
+    # reader = vtk.vtkXMLUnstructuredGridReader()
+    # reader.SetFileName(volume_mesh_path)
+    # reader.Update()
+    # vol = reader.GetOutput()
+    # for i in range(vol.GetPointData().GetNumberOfArrays()):
+    #     print(vol.GetPointData().GetArrayName(i))
+    #     array = v2n(vol.GetPointData().GetArray(i))
+    #     print(array)
+
+
     # read volume mesh in vtk
-    fname = 'unit_cube_volume.vtu'
     reader = vtk.vtkXMLUnstructuredGridReader()
-    reader.SetFileName(fname)
+    reader.SetFileName(volume_mesh_path)
     reader.Update()
     vol = reader.GetOutput()
 
-    surf_dict = defaultdict(list)
-    surf_ids = {}
-    points_inlet = []
-    for f in ["solid", "fluid"]:
-        # select sub-mesh
-        vol_f = threshold(vol, 1, "ids_" + f).GetOutput()
+    # Is it necessary for unit cube??
+    # reset global ids
+    n_array = n2v(np.arange(vol.GetNumberOfPoints()).astype(np.int32) + 1)
+    e_array = n2v(np.arange(vol.GetNumberOfCells()).astype(np.int32) + 1)
+    n_array.SetName("GlobalNodeID")
+    e_array.SetName("GlobalElementID")
+    vol.GetPointData().AddArray(n_array)
+    vol.GetCellData().AddArray(e_array)
 
-        # reset global ids
-        n_array = n2v(np.arange(vol_f.GetNumberOfPoints()).astype(np.int32) + 1)
-        e_array = n2v(np.arange(vol_f.GetNumberOfCells()).astype(np.int32) + 1)
-        n_array.SetName("GlobalNodeID")
-        e_array.SetName("GlobalElementID")
-        vol_f.GetPointData().AddArray(n_array)
-        vol_f.GetCellData().AddArray(e_array)
+    # map point data to cell data
+    p2c = vtk.vtkPointDataToCellData()
+    p2c.SetInputData(vol)
+    p2c.PassPointDataOn()
+    p2c.Update()
+    vol = p2c.GetOutput()
 
-        # map point data to cell data
-        p2c = vtk.vtkPointDataToCellData()
-        p2c.SetInputData(vol_f)
-        p2c.PassPointDataOn()
-        p2c.Update()
-        vol_f = p2c.GetOutput()
+    # extract surfaces
+    extract = vtk.vtkGeometryFilter()
+    extract.SetInputData(vol)
+    # extract.SetNonlinearSubdivisionLevel(0)
+    extract.Update()
+    surfaces = extract.GetOutput()
 
-        # extract surfaces
-        extract = vtk.vtkGeometryFilter()
-        extract.SetInputData(vol_f)
-        # extract.SetNonlinearSubdivisionLevel(0)
-        extract.Update()
-        surfaces = extract.GetOutput()
+    # threshold surfaces
+    for name in ["Z0", "Z1"]:
 
-        # threshold surfaces
-        for name in surf_dict.keys():
-            # interior quad elements
-            if self.p["n_seg"] == 1 and "_zero" in name:
-                # threshold circle segments first
-                thresh = vtk.vtkThreshold()
-                thresh.SetInputData(vol_f)
-                thresh.SetInputArrayToProcess(0, 0, 0, 1, "ids_" + name[0] + "_seg")
-                thresh.SetUpperThreshold(1)
-                thresh.SetLowerThreshold(1)
-                thresh.Update()
+        # select only current surface
+        thresh = vtk.vtkThreshold()
+        thresh.SetInputData(surfaces)
+        thresh.SetInputArrayToProcess(0, 0, 0, 0, name)
+        thresh.SetUpperThreshold(1)
+        thresh.SetLowerThreshold(1)
+        thresh.Update()
+        surf = thresh.GetOutput()
+        if surf.GetNumberOfPoints() > 0:
+            surf = clean(extract_surface(surf))
 
-                # extract surfaces
-                extract = vtk.vtkGeometryFilter()
-                extract.SetInputData(thresh.GetOutput())
-                extract.SetNonlinearSubdivisionLevel(0)
-                extract.Update()
-                inp = extract.GetOutput()
-            else:
-                inp = surfaces
+        write_geo(path+"/mesh_surfaces/"+name+'.vtp', extract_surface(surf))
 
-            # select only current surface
-            thresh = vtk.vtkThreshold()
-            thresh.SetInputData(inp)
-            thresh.SetInputArrayToProcess(0, 0, 0, 0, "ids_" + name)
-            thresh.SetUpperThreshold(1)
-            thresh.SetLowerThreshold(1)
-            thresh.Update()
-            surf = thresh.GetOutput()
-            if surf.GetNumberOfPoints() > 0:
-                surf = clean(extract_surface(surf))
+        # # get new GlobalNodeIDs of surface points
+        # surf_ids[f + "_" + name] = v2n(
+        #     surf.GetPointData().GetArray("GlobalNodeID")
+        # ).tolist()
 
-            fout = os.path.join(self.p["f_out"], f, "mesh-surfaces", name + ".vtp")
-            write_geo(fout, extract_surface(surf))
-
-            # get new GlobalNodeIDs of surface points
-            surf_ids[f + "_" + name] = v2n(
-                surf.GetPointData().GetArray("GlobalNodeID")
-            ).tolist()
-
-            # store inlet points (to calculate flow profile later)
-            if f == "fluid" and name == "start":
-                points_inlet = v2n(surf.GetPoints().GetData())
-
-        # export volume mesh
-        write_geo(os.path.join(self.p["f_out"], f, "mesh-complete.mesh.vtu"), vol_f)
+        
 
 
 

@@ -27,6 +27,15 @@ def main():
     volume_mesh.SetPoints(points)
     volume_mesh.InsertNextCell(hexahedron.GetCellType(), hexahedron.GetPointIds())
 
+    print(volume_mesh.GetPointData().GetNumberOfArrays())
+    print(volume_mesh.GetCellData().GetNumberOfArrays())
+    # print(volume_mesh.GetCellData().GetNumberOfCells())
+    breakpoint()
+
+
+
+
+
     # Write the volume mesh as a VTU file
     writer_volume = vtk.vtkXMLUnstructuredGridWriter()
     writer_volume.SetFileName('unit_cube_volume.vtu')
